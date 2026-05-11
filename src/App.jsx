@@ -5,7 +5,8 @@ const COLS = 10;
 const ROWS = 20;
 const CELL = 28;
 const INITIAL_CHAOS = 1;
-const LEVEL_UP_EVERY_MS = 30000;
+/** Total lines cleared; every N lines raises chaos by one until MAX_CHAOS. */
+const LINES_PER_CHAOS_LEVEL = 3;
 const MIN_CHAOS = 1;
 const MAX_CHAOS = 5;
 const PLAYER_NAME_KEY = "ideo-chaos-tetris-player-name";
@@ -162,6 +163,10 @@ function scoreForLines(cleared) {
   return [0, 100, 300, 550, 900, 1250, 1600][cleared] ?? cleared * 300;
 }
 
+function chaosFromTotalLines(totalLines) {
+  return Math.min(MAX_CHAOS, INITIAL_CHAOS + Math.floor(totalLines / LINES_PER_CHAOS_LEVEL));
+}
+
 async function fetchLeaderboard() {
   const response = await fetch(
     `${SUPABASE_URL}/rest/v1/leaderboard?select=name,score,lines,level,created_at&order=score.desc&order=lines.desc&limit=${MAX_LEADERBOARD_ENTRIES}`,
@@ -224,6 +229,10 @@ function runSelfTests() {
   console.assert(collides(board, { shape: [[0, 0]], letters: ["I"], x: -1, y: 0 }), "collides detects left wall");
   console.assert(!collides(board, { shape: [[0, 0]], letters: ["I"], x: 4, y: 0 }), "collides allows open board space");
   console.assert(poolForChaos(1) === LOW_CHAOS && poolForChaos(5).length > poolForChaos(3).length, "chaos levels increase shape variety");
+  console.assert(
+    chaosFromTotalLines(0) === 1 && chaosFromTotalLines(2) === 1 && chaosFromTotalLines(3) === 2 && chaosFromTotalLines(12) === MAX_CHAOS,
+    "chaos tracks cumulative line clears",
+  );
   console.assert(sanitizePlayerName("   ") === "Anonymous" && sanitizePlayerName("Tomoya Mori Long Name").length <= 18, "sanitizePlayerName handles empty and long names");
   console.assert(addLeaderboardEntry([{ name: "A", score: 10, lines: 0 }], { name: "B", score: 20, lines: 0 })[0].name === "B", "addLeaderboardEntry sorts high scores first");
   console.assert(SUPABASE_URL.includes("supabase.co") && SUPABASE_ANON_KEY.length > 80, "Supabase config is present");
@@ -316,7 +325,7 @@ export default function IDEOChaosTetris() {
   const [clearEffect, setClearEffect] = useState(0);
   const [levelNotice, setLevelNotice] = useState(INITIAL_CHAOS);
   const touchStart = useRef(null);
-  const latestRef = useRef({ board, piece, nextPiece, chaos, running, gameOver });
+  const latestRef = useRef({ board, piece, nextPiece, chaos, lines, running, gameOver });
 
   const submitPlayerName = useCallback((e) => {
     e?.preventDefault?.();
@@ -346,8 +355,8 @@ export default function IDEOChaosTetris() {
   }, []);
 
   useEffect(() => {
-    latestRef.current = { board, piece, nextPiece, chaos, running, gameOver };
-  }, [board, piece, nextPiece, chaos, running, gameOver]);
+    latestRef.current = { board, piece, nextPiece, chaos, lines, running, gameOver };
+  }, [board, piece, nextPiece, chaos, lines, running, gameOver]);
 
   const spawn = useCallback((currentBoard, currentChaos, incoming) => {
     const newPiece = incoming ?? makePiece(currentChaos);
@@ -360,17 +369,25 @@ export default function IDEOChaosTetris() {
   }, []);
 
   const lockPiece = useCallback((currentBoard, currentPiece, dropBonus = 0) => {
-    const { chaos: currentChaos, nextPiece: queuedPiece } = latestRef.current;
+    const { chaos: currentChaos, nextPiece: queuedPiece, lines: prevLines = 0 } = latestRef.current;
     const merged = merge(currentBoard, currentPiece);
     const result = clearLines(merged);
+    const nextLines = prevLines + result.cleared;
+    const targetChaos = chaosFromTotalLines(nextLines);
+
     setBoard(result.board);
-    setLines((l) => l + result.cleared);
+    setLines(nextLines);
     setScore((s) => s + dropBonus + (result.cleared ? scoreForLines(result.cleared) + currentChaos * 20 * result.cleared : 5));
     if (result.cleared) {
       setClearEffect(result.cleared);
       window.setTimeout(() => setClearEffect(0), 700);
     }
-    spawn(result.board, currentChaos, queuedPiece);
+    if (targetChaos > currentChaos) {
+      setLevelNotice(targetChaos);
+      window.setTimeout(() => setLevelNotice(0), 1200);
+    }
+    setChaos(targetChaos);
+    spawn(result.board, targetChaos, queuedPiece);
   }, [spawn]);
 
   const tick = useCallback(() => {
@@ -412,7 +429,7 @@ export default function IDEOChaosTetris() {
     } else {
       lockPiece(currentBoard, currentPiece);
     }
-  }, [lockPiece]);
+  }, [hasStarted, lockPiece]);
 
   const hardDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
@@ -420,7 +437,7 @@ export default function IDEOChaosTetris() {
     let drop = 0;
     while (!collides(currentBoard, currentPiece, 0, drop + 1)) drop += 1;
     lockPiece(currentBoard, { ...currentPiece, y: currentPiece.y + drop }, drop * 2);
-  }, [lockPiece]);
+  }, [hasStarted, lockPiece]);
 
   const rotatePiece = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
@@ -435,29 +452,10 @@ export default function IDEOChaosTetris() {
     }
   }, [hasStarted]);
 
-  const resetLetterOrder = useCallback(() => {
-    setPiece((p) => ({ ...p, letters: orderedLetters(p.shape.length) }));
-  }, []);
-
   useEffect(() => {
     const id = window.setInterval(tick, speed);
     return () => window.clearInterval(id);
   }, [tick, speed]);
-
-  useEffect(() => {
-    if (!hasStarted || !running || gameOver) return undefined;
-    const id = window.setInterval(() => {
-      setChaos((current) => {
-        if (current >= MAX_CHAOS) return current;
-        const next = current + 1;
-        setNextPiece(makePiece(next));
-        setLevelNotice(next);
-        window.setTimeout(() => setLevelNotice(0), 1200);
-        return next;
-      });
-    }, LEVEL_UP_EVERY_MS);
-    return () => window.clearInterval(id);
-  }, [hasStarted, running, gameOver]);
 
   useEffect(() => {
     if (!hasStarted) return undefined;
@@ -470,12 +468,12 @@ export default function IDEOChaosTetris() {
       if (e.key === "ArrowDown") softDrop();
       if (e.key === "ArrowUp" || e.key === "z" || e.key === "Z") rotatePiece();
       if (e.key === " ") hardDrop();
-      if (e.key === "c" || e.key === "C") resetLetterOrder();
+      if (e.key === "c" || e.key === "C") reset();
       if (e.key === "p" || e.key === "P") setRunning((r) => !r);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hardDrop, hasStarted, move, rotatePiece, resetLetterOrder, softDrop]);
+  }, [hardDrop, hasStarted, move, reset, rotatePiece, softDrop]);
 
   useEffect(() => {
     let cancelled = false;
@@ -690,19 +688,14 @@ export default function IDEOChaosTetris() {
                   <span>Level {chaos}</span>
                 </div>
                 <input
-                  className="w-full mt-2 accent-black"
+                  className="w-full mt-2 accent-black opacity-70 cursor-not-allowed"
                   type="range"
                   min={MIN_CHAOS}
                   max={MAX_CHAOS}
                   step="1"
                   value={chaos}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    setChaos(next);
-                    setNextPiece(makePiece(next));
-                    setLevelNotice(next);
-                    window.setTimeout(() => setLevelNotice(0), 1200);
-                  }}
+                  disabled
+                  aria-label="Chaos level (rises as you clear lines)"
                 />
                 <div className="grid grid-cols-5 gap-1 mt-3" aria-label="Chaos level indicator">
                   {Array.from({ length: MAX_CHAOS }, (_, i) => i + 1).map((level) => (
@@ -715,7 +708,18 @@ export default function IDEOChaosTetris() {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs mt-2 leading-relaxed">Starts at Level 1. Every 30 seconds, the chaos level steps up until Level 5.</p>
+                <p className="text-xs mt-2 leading-relaxed">
+                  Starts at Chaos 1. Every {LINES_PER_CHAOS_LEVEL} lines cleared bumps chaos by one, up to Level {MAX_CHAOS}.
+                  {chaos < MAX_CHAOS ? (
+                    <>
+                      {" "}
+                      Clear <strong>{chaos * LINES_PER_CHAOS_LEVEL - lines}</strong> more line
+                      {chaos * LINES_PER_CHAOS_LEVEL - lines === 1 ? "" : "s"} for Chaos {chaos + 1}.
+                    </>
+                  ) : (
+                    <> Maximum chaos.</>
+                  )}
+                </p>
               </div>
 
               <div className="mt-5 rounded-xl p-4 flex items-center justify-between" style={{ background: PALETTE.soft }}>
@@ -724,7 +728,7 @@ export default function IDEOChaosTetris() {
                   <PiecePreview piece={nextPiece} />
                 </div>
                 <div className="text-right text-xs leading-relaxed max-w-[145px]">
-                  Arrow keys move/drop.<br />↑ rotates. Space slams.<br />C resets letters.
+                  Arrow keys move/drop.<br />↑ rotates. Space slams.<br />C resets the game.
                 </div>
               </div>
 
