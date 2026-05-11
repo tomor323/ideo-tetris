@@ -341,6 +341,9 @@ export default function IDEOBlockParty() {
   const [levelNotice, setLevelNotice] = useState(0);
   const touchStart = useRef(null);
   const clearEffectTimeoutRef = useRef(null);
+  const chaosNoticeTimeoutRef = useRef(null);
+  /** While the chaos level-up overlay is visible, gravity and controls are frozen (music keeps playing). */
+  const chaosNoticeBlocksPlayRef = useRef(false);
   const bgmRef = useRef(null);
   const latestRef = useRef({ board, piece, nextPiece, chaos, lines, running, gameOver });
 
@@ -360,6 +363,15 @@ export default function IDEOBlockParty() {
   }, [musicEnabled, nameInput]);
 
   const speed = 680 - chaos * 90;
+
+  const dismissChaosLevelNotice = useCallback(() => {
+    if (chaosNoticeTimeoutRef.current) {
+      window.clearTimeout(chaosNoticeTimeoutRef.current);
+      chaosNoticeTimeoutRef.current = null;
+    }
+    chaosNoticeBlocksPlayRef.current = false;
+    setLevelNotice(0);
+  }, []);
 
   useEffect(() => {
     runSelfTests();
@@ -434,8 +446,17 @@ export default function IDEOBlockParty() {
       setClearEffect(0);
     }
     if (targetChaos > currentChaos) {
+      if (chaosNoticeTimeoutRef.current) {
+        window.clearTimeout(chaosNoticeTimeoutRef.current);
+        chaosNoticeTimeoutRef.current = null;
+      }
+      chaosNoticeBlocksPlayRef.current = true;
       setLevelNotice(targetChaos);
-      window.setTimeout(() => setLevelNotice(0), CHAOS_LEVEL_TOAST_MS);
+      chaosNoticeTimeoutRef.current = window.setTimeout(() => {
+        chaosNoticeBlocksPlayRef.current = false;
+        setLevelNotice(0);
+        chaosNoticeTimeoutRef.current = null;
+      }, CHAOS_LEVEL_TOAST_MS);
     }
     setChaos(targetChaos);
     spawn(result.board, targetChaos, queuedPiece);
@@ -444,6 +465,7 @@ export default function IDEOBlockParty() {
   const tick = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
     if (!hasStarted || !isRunning || isGameOver) return;
+    if (chaosNoticeBlocksPlayRef.current) return;
     if (!collides(currentBoard, currentPiece, 0, 1)) {
       setPiece((p) => ({ ...p, y: p.y + 1 }));
     } else {
@@ -452,6 +474,7 @@ export default function IDEOBlockParty() {
   }, [hasStarted, lockPiece]);
 
   const reset = useCallback((nextChaos = INITIAL_CHAOS) => {
+    dismissChaosLevelNotice();
     setBoard(emptyBoard());
     setChaos(nextChaos);
     setPiece(makePiece(nextChaos));
@@ -460,20 +483,20 @@ export default function IDEOBlockParty() {
     setLines(0);
     setScoreSaved(false);
     setClearEffect(0);
-    setLevelNotice(0);
     setGameOver(false);
     setRunning(hasStarted);
-  }, [hasStarted]);
+  }, [dismissChaosLevelNotice, hasStarted]);
 
   const move = useCallback((dx) => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!isRunning || isGameOver || collides(currentBoard, currentPiece, dx, 0)) return;
+    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
+    if (collides(currentBoard, currentPiece, dx, 0)) return;
     setPiece((p) => ({ ...p, x: p.x + dx }));
   }, []);
 
   const softDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
     if (!collides(currentBoard, currentPiece, 0, 1)) {
       setPiece((p) => ({ ...p, y: p.y + 1 }));
       setScore((s) => s + 1);
@@ -484,7 +507,7 @@ export default function IDEOBlockParty() {
 
   const hardDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
     let drop = 0;
     while (!collides(currentBoard, currentPiece, 0, drop + 1)) drop += 1;
     lockPiece(currentBoard, { ...currentPiece, y: currentPiece.y + drop }, drop * 2);
@@ -492,7 +515,7 @@ export default function IDEOBlockParty() {
 
   const rotatePiece = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
     const nextShape = rotate(currentPiece.shape);
     const kicks = [0, -1, 1, -2, 2];
     for (const k of kicks) {
@@ -570,6 +593,11 @@ export default function IDEOBlockParty() {
   useEffect(
     () => () => {
       if (clearEffectTimeoutRef.current) window.clearTimeout(clearEffectTimeoutRef.current);
+      if (chaosNoticeTimeoutRef.current) {
+        window.clearTimeout(chaosNoticeTimeoutRef.current);
+        chaosNoticeTimeoutRef.current = null;
+      }
+      chaosNoticeBlocksPlayRef.current = false;
     },
     [],
   );
@@ -723,6 +751,9 @@ export default function IDEOBlockParty() {
                     <div className="mt-3 text-xs sm:text-sm font-semibold" style={{ color: "rgba(0,0,0,.45)" }}>
                       Shapes get wilder — stay sharp.
                     </div>
+                    <div className="mt-4 text-[10px] sm:text-xs uppercase tracking-widest font-bold" style={{ color: "rgba(0,0,0,.38)" }}>
+                      Play paused — resumes when this closes
+                    </div>
                   </motion.div>
                 </motion.div>
               )}
@@ -779,6 +810,7 @@ export default function IDEOBlockParty() {
                   variant="outline"
                   className="rounded-2xl"
                   onClick={() => {
+                    dismissChaosLevelNotice();
                     setRunning(false);
                     setHasStarted(false);
                   }}
