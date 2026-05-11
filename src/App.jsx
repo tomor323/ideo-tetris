@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import bgmUrl from "./assets/Block_Party_Blitz.mp3";
 
 const COLS = 10;
 const ROWS = 20;
@@ -9,11 +10,33 @@ const INITIAL_CHAOS = 1;
 const LINES_PER_CHAOS_LEVEL = 3;
 const MIN_CHAOS = 1;
 const MAX_CHAOS = 5;
-const PLAYER_NAME_KEY = "ideo-chaos-tetris-player-name";
+const PLAYER_NAME_KEY = "ideo-block-party-player-name";
+const PLAYER_NAME_LEGACY_KEY = "ideo-chaos-tetris-player-name";
+const MUSIC_ENABLED_KEY = "ideo-block-party-music-enabled";
+
+function readStoredPlayerName() {
+  try {
+    return window.localStorage.getItem(PLAYER_NAME_KEY) || window.localStorage.getItem(PLAYER_NAME_LEGACY_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function readMusicEnabled() {
+  try {
+    const v = window.localStorage.getItem(MUSIC_ENABLED_KEY);
+    if (v === null) return true;
+    return v !== "0";
+  } catch {
+    return true;
+  }
+}
 const SUPABASE_URL = "https://xxlzekgookhwnwuwjtzb.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4bHpla2dvb2tod253dXdqdHpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwMjA1NjQsImV4cCI6MjA5MzU5NjU2NH0.MgpItekpqVYWeuaSSFcZ0v06IJ07GISTkfG0W-LcCf8";
 const MAX_LEADERBOARD_ENTRIES = 10;
 const LETTERS = ["I", "D", "E", "O"];
+const LINE_CLEAR_TOAST_MS = 700;
+const CHAOS_LEVEL_TOAST_MS = 2600;
 
 const PALETTE = {
   bg: "#fbfaf7",
@@ -21,6 +44,15 @@ const PALETTE = {
   paper: "#ffffff",
   soft: "#ece7dd",
 };
+
+/** Playfield frame gets slightly cooler/darker as chaos rises. */
+function playfieldShellColor(chaosLevel) {
+  const t = (Math.min(MAX_CHAOS, Math.max(MIN_CHAOS, chaosLevel)) - MIN_CHAOS) / (MAX_CHAOS - MIN_CHAOS);
+  const r = Math.round(255 - 42 * t);
+  const g = Math.round(253 - 38 * t);
+  const b = Math.round(250 - 36 * t);
+  return `rgb(${r},${g},${b})`;
+}
 
 const LOW_CHAOS = [
   [[0, 0], [1, 0], [2, 0], [3, 0]],
@@ -288,30 +320,13 @@ function PiecePreview({ piece }) {
   );
 }
 
-export default function IDEOChaosTetris() {
+export default function IDEOBlockParty() {
   const [board, setBoard] = useState(emptyBoard);
   const [cellSize, setCellSize] = useState(() => getResponsiveCellSize());
-  const [playerName, setPlayerName] = useState(() => {
-    try {
-      return window.localStorage.getItem(PLAYER_NAME_KEY) || "";
-    } catch {
-      return "";
-    }
-  });
-  const [nameInput, setNameInput] = useState(() => {
-    try {
-      return window.localStorage.getItem(PLAYER_NAME_KEY) || "";
-    } catch {
-      return "";
-    }
-  });
-  const [hasStarted, setHasStarted] = useState(() => {
-    try {
-      return Boolean(window.localStorage.getItem(PLAYER_NAME_KEY));
-    } catch {
-      return false;
-    }
-  });
+  const [playerName, setPlayerName] = useState(() => readStoredPlayerName());
+  const [nameInput, setNameInput] = useState(() => readStoredPlayerName());
+  const [hasStarted, setHasStarted] = useState(() => Boolean(readStoredPlayerName()));
+  const [musicEnabled, setMusicEnabled] = useState(() => readMusicEnabled());
   const [leaderboard, setLeaderboard] = useState([]);
   const [leaderboardStatus, setLeaderboardStatus] = useState("Loading shared leaderboard…");
   const [scoreSaved, setScoreSaved] = useState(false);
@@ -323,8 +338,10 @@ export default function IDEOChaosTetris() {
   const [lines, setLines] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [clearEffect, setClearEffect] = useState(0);
-  const [levelNotice, setLevelNotice] = useState(INITIAL_CHAOS);
+  const [levelNotice, setLevelNotice] = useState(0);
   const touchStart = useRef(null);
+  const clearEffectTimeoutRef = useRef(null);
+  const bgmRef = useRef(null);
   const latestRef = useRef({ board, piece, nextPiece, chaos, lines, running, gameOver });
 
   const submitPlayerName = useCallback((e) => {
@@ -339,13 +356,38 @@ export default function IDEOChaosTetris() {
     } catch {
       // localStorage can fail in private browsing or restricted embeds; the game still works for the current session.
     }
-  }, [nameInput]);
+    if (musicEnabled) void bgmRef.current?.play().catch(() => {});
+  }, [musicEnabled, nameInput]);
 
   const speed = 680 - chaos * 90;
 
   useEffect(() => {
     runSelfTests();
   }, []);
+
+  useEffect(() => {
+    const audio = new Audio(bgmUrl);
+    audio.loop = true;
+    audio.preload = "auto";
+    bgmRef.current = audio;
+    return () => {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      bgmRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = bgmRef.current;
+    if (!audio) return;
+    const shouldPlay = hasStarted && running && !gameOver && musicEnabled;
+    if (shouldPlay) {
+      void audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [gameOver, hasStarted, musicEnabled, running]);
 
   useEffect(() => {
     const updateCellSize = () => setCellSize(getResponsiveCellSize());
@@ -378,13 +420,22 @@ export default function IDEOChaosTetris() {
     setBoard(result.board);
     setLines(nextLines);
     setScore((s) => s + dropBonus + (result.cleared ? scoreForLines(result.cleared) + currentChaos * 20 * result.cleared : 5));
-    if (result.cleared) {
+    if (clearEffectTimeoutRef.current) {
+      window.clearTimeout(clearEffectTimeoutRef.current);
+      clearEffectTimeoutRef.current = null;
+    }
+    if (result.cleared > 0) {
       setClearEffect(result.cleared);
-      window.setTimeout(() => setClearEffect(0), 700);
+      clearEffectTimeoutRef.current = window.setTimeout(() => {
+        setClearEffect(0);
+        clearEffectTimeoutRef.current = null;
+      }, LINE_CLEAR_TOAST_MS);
+    } else {
+      setClearEffect(0);
     }
     if (targetChaos > currentChaos) {
       setLevelNotice(targetChaos);
-      window.setTimeout(() => setLevelNotice(0), 1200);
+      window.setTimeout(() => setLevelNotice(0), CHAOS_LEVEL_TOAST_MS);
     }
     setChaos(targetChaos);
     spawn(result.board, targetChaos, queuedPiece);
@@ -409,7 +460,7 @@ export default function IDEOChaosTetris() {
     setLines(0);
     setScoreSaved(false);
     setClearEffect(0);
-    setLevelNotice(nextChaos);
+    setLevelNotice(0);
     setGameOver(false);
     setRunning(hasStarted);
   }, [hasStarted]);
@@ -516,6 +567,13 @@ export default function IDEOChaosTetris() {
       });
   }, [chaos, gameOver, hasStarted, lines, playerName, score, scoreSaved]);
 
+  useEffect(
+    () => () => {
+      if (clearEffectTimeoutRef.current) window.clearTimeout(clearEffectTimeoutRef.current);
+    },
+    [],
+  );
+
   const ghostPiece = useMemo(() => {
     const ghost = { ...piece };
     while (!collides(board, ghost, 0, 1)) ghost.y += 1;
@@ -537,6 +595,35 @@ export default function IDEOChaosTetris() {
     return nextDisplay;
   }, [board, ghostPiece, piece]);
 
+  const playfieldGridStyle = useMemo(() => {
+    const lineRgb = Math.round(210 - chaos * 18);
+    const line = `rgb(${lineRgb},${lineRgb},${lineRgb})`;
+    return {
+      gridTemplateColumns: `repeat(${COLS}, ${cellSize}px)`,
+      gridTemplateRows: `repeat(${ROWS}, ${cellSize}px)`,
+      backgroundImage: `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`,
+      backgroundSize: `${cellSize}px ${cellSize}px`,
+    };
+  }, [cellSize, chaos]);
+
+  const boardFrameMotion = useMemo(() => {
+    if (levelNotice > 0) {
+      return {
+        x: [0, -6, 6, -5, 5, -3, 3, 0],
+        y: [0, 4, -3, 2, -2, 0],
+        scale: [1, 1.06, 0.97, 1.03, 1],
+      };
+    }
+    if (clearEffect > 0) return { scale: [1, 1.025, 1], x: 0, y: 0 };
+    return { scale: 1, x: 0, y: 0 };
+  }, [clearEffect, levelNotice]);
+
+  const boardFrameTransition = useMemo(() => {
+    if (levelNotice > 0) return { duration: 2.25, ease: "easeInOut" };
+    if (clearEffect > 0) return { duration: 0.45 };
+    return { duration: 0.2 };
+  }, [clearEffect, levelNotice]);
+
   return (
     <div className="min-h-screen w-full p-4 md:p-8 flex items-center justify-center" style={{ background: PALETTE.bg, color: PALETTE.ink }}>
       {!hasStarted && (
@@ -547,7 +634,7 @@ export default function IDEOChaosTetris() {
             style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
           >
             <div className="text-sm uppercase tracking-wide font-semibold">Welcome to</div>
-            <div className="mt-1 text-4xl font-semibold tracking-tight">IDEO Tetris</div>
+            <div className="mt-1 text-4xl font-semibold tracking-tight">IDEO Block Party</div>
             <p className="mt-3 text-sm leading-relaxed">Enter your name or nickname to join the shared online leaderboard.</p>
             <input
               autoFocus
@@ -564,10 +651,14 @@ export default function IDEOChaosTetris() {
         </div>
       )}
       <div className="w-full max-w-5xl grid md:grid-cols-[1fr_310px] gap-6 items-start">
-        <motion.div animate={clearEffect ? { scale: [1, 1.025, 1] } : { scale: 1 }} className="flex justify-center">
+        <motion.div animate={boardFrameMotion} transition={boardFrameTransition} className="flex justify-center">
           <div
-            className="relative p-2 sm:p-3 rounded-2xl shadow-xl"
-            style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
+            className="relative p-2 sm:p-3 rounded-2xl overflow-hidden"
+            style={{
+              background: playfieldShellColor(chaos),
+              border: `2px solid ${PALETTE.ink}`,
+              boxShadow: "0 20px 50px rgba(0,0,0,.14)",
+            }}
             onTouchStart={(e) => {
               touchStart.current = e.touches[0].clientX;
             }}
@@ -579,15 +670,7 @@ export default function IDEOChaosTetris() {
               touchStart.current = null;
             }}
           >
-            <div
-              className="grid"
-              style={{
-                gridTemplateColumns: `repeat(${COLS}, ${cellSize}px)`,
-                gridTemplateRows: `repeat(${ROWS}, ${cellSize}px)`,
-                backgroundImage: "linear-gradient(#eee 1px, transparent 1px), linear-gradient(90deg, #eee 1px, transparent 1px)",
-                backgroundSize: `${cellSize}px ${cellSize}px`,
-              }}
-            >
+            <div className="grid" style={playfieldGridStyle}>
               {display.flatMap((row, y) =>
                 row.map((cell, x) => (
                   <div key={`${x}-${y}`} style={{ width: cellSize, height: cellSize }}>
@@ -596,24 +679,57 @@ export default function IDEOChaosTetris() {
                 )),
               )}
             </div>
-            {levelNotice > 0 && !gameOver && (
-              <motion.div
-                className="absolute inset-0 rounded-xl pointer-events-none flex items-start justify-center pt-16"
-                initial={{ opacity: 0, y: -16, scale: 0.92 }}
-                animate={{ opacity: [0, 1, 1, 0], y: [-16, 0, 0, -8], scale: [0.92, 1.08, 1.08, 1] }}
-                transition={{ duration: 1.2 }}
-              >
-                <div
-                  className="px-5 py-3 rounded-2xl text-3xl sm:text-4xl font-semibold tracking-tight shadow-xl"
-                  style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
+            <AnimatePresence>
+              {levelNotice > 0 && !gameOver && (
+                <motion.div
+                  key={`chaos-up-${levelNotice}`}
+                  className="absolute inset-0 z-[6] pointer-events-none flex flex-col items-center justify-center rounded-xl"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.35 }}
                 >
-                  LEVEL {levelNotice}!
-                </div>
-              </motion.div>
-            )}
+                  <motion.div
+                    className="absolute inset-0 rounded-xl"
+                    style={{
+                      background:
+                        "radial-gradient(ellipse 90% 80% at 50% 42%, rgba(0,0,0,.78) 0%, rgba(0,0,0,.52) 50%, rgba(0,0,0,.12) 100%)",
+                    }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0, 1, 0.72, 0] }}
+                    transition={{ duration: 2.35, times: [0, 0.12, 0.4, 1], ease: "easeOut" }}
+                  />
+                  <motion.div
+                    className="relative z-10 mx-4 px-7 py-5 rounded-2xl text-center max-w-[min(92vw,420px)]"
+                    style={{
+                      background: "rgba(251,250,247,.96)",
+                      border: `3px solid ${PALETTE.ink}`,
+                      boxShadow: "0 0 0 5px rgba(255,255,255,.35), 0 28px 70px rgba(0,0,0,.45)",
+                    }}
+                    initial={{ scale: 0.45, opacity: 0, rotate: -5 }}
+                    animate={{
+                      scale: [0.45, 1.18, 1.03, 1],
+                      opacity: [0, 1, 1, 1],
+                      rotate: [-5, 3, -1.5, 0],
+                    }}
+                    transition={{ duration: 2.05, times: [0, 0.22, 0.48, 1], ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <div className="text-[11px] sm:text-xs uppercase tracking-[0.38em] font-bold" style={{ color: "rgba(0,0,0,.5)" }}>
+                      Chaos level
+                    </div>
+                    <div className="mt-2 text-4xl sm:text-6xl font-black tracking-tight leading-none" style={{ color: PALETTE.ink }}>
+                      {levelNotice}
+                    </div>
+                    <div className="mt-3 text-xs sm:text-sm font-semibold" style={{ color: "rgba(0,0,0,.45)" }}>
+                      Shapes get wilder — stay sharp.
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             {clearEffect > 0 && !gameOver && (
               <motion.div
-                className="absolute inset-0 rounded-xl pointer-events-none flex items-center justify-center"
+                className="absolute inset-0 z-[7] rounded-xl pointer-events-none flex items-center justify-center"
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: [0, 1, 1, 0], scale: [0.9, 1.08, 1.08, 1] }}
                 transition={{ duration: 0.7 }}
@@ -629,8 +745,8 @@ export default function IDEOChaosTetris() {
             {gameOver && (
               <div className="absolute inset-0 rounded-xl bg-white/85 flex items-center justify-center text-center p-6">
                 <div>
-                  <div className="text-4xl font-semibold tracking-tight">IDEO-verload</div>
-                  <p className="mt-2 text-sm">The logo escaped the grid. Honestly, that feels on brand.</p>
+                  <div className="text-4xl font-semibold tracking-tight">Block overload</div>
+                  <p className="mt-2 text-sm">The grid couldn&apos;t take the party anymore.</p>
                   <div className="mt-3 text-sm">Score submitted for <strong>{sanitizePlayerName(playerName)}</strong>.</div>
                   <Button className="mt-4 rounded-2xl" onClick={() => reset()}>
                     Play again
@@ -649,7 +765,7 @@ export default function IDEOChaosTetris() {
                   ⚡
                 </div>
                 <div>
-                  <h1 className="text-3xl font-semibold leading-none tracking-tight">IDEO Tetris</h1>
+                  <h1 className="text-3xl font-semibold leading-none tracking-tight">IDEO Block Party</h1>
                   <p className="text-sm mt-1">How might we clear lines?</p>
                 </div>
               </div>
@@ -740,6 +856,26 @@ export default function IDEOChaosTetris() {
                 <Button className="rounded-2xl" variant="outline" onClick={() => reset()}>
                   <Icon>↻</Icon>Reset
                 </Button>
+                <Button
+                  className="rounded-2xl col-span-2"
+                  variant="outline"
+                  type="button"
+                  aria-pressed={musicEnabled}
+                  onClick={() => {
+                    setMusicEnabled((on) => {
+                      const next = !on;
+                      try {
+                        window.localStorage.setItem(MUSIC_ENABLED_KEY, next ? "1" : "0");
+                      } catch {
+                        // ignore
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <Icon>{musicEnabled ? "♪" : "−"}</Icon>
+                  {musicEnabled ? "Music on" : "Music off"}
+                </Button>
               </div>
 
               <div className="grid grid-cols-3 gap-2 mt-3 md:hidden">
@@ -780,7 +916,7 @@ export default function IDEOChaosTetris() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm leading-relaxed">No scores yet. Be the first to make the logo collapse.</p>
+                <p className="text-sm leading-relaxed">No scores yet. Be the first to own the dance floor.</p>
               )}
             </CardContent>
           </Card>
