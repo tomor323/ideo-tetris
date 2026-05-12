@@ -246,8 +246,12 @@ function addLeaderboardEntry(entries, entry) {
 
 function getResponsiveCellSize() {
   if (typeof window === "undefined") return CELL;
-  const sidePadding = window.innerWidth < 768 ? 56 : 96;
-  return Math.max(18, Math.min(CELL, Math.floor((window.innerWidth - sidePadding) / COLS)));
+  if (window.innerWidth < 768) {
+    const widthFit = Math.floor((window.innerWidth - 40) / COLS);
+    const heightFit = Math.floor((window.innerHeight - 260) / ROWS);
+    return Math.max(16, Math.min(CELL, widthFit, heightFit));
+  }
+  return Math.max(18, Math.min(CELL, Math.floor((window.innerWidth - 96) / COLS)));
 }
 
 function runSelfTests() {
@@ -270,15 +274,15 @@ function runSelfTests() {
   console.assert(addLeaderboardEntry([{ name: "A", score: 10, lines: 0 }], { name: "B", score: 20, lines: 0 })[0].name === "B", "addLeaderboardEntry sorts high scores first");
   console.assert(SUPABASE_URL.includes("supabase.co") && SUPABASE_ANON_KEY.length > 80, "Supabase config is present");
   console.assert([...LOW_CHAOS, ...MED_CHAOS, ...HIGH_CHAOS].every((shape) => shape.length === LETTERS.length), "all chaos shapes have exactly I, D, E, O blocks");
-  console.assert(getResponsiveCellSize() >= 18 && getResponsiveCellSize() <= CELL, "responsive cell size stays within usable bounds");
+  console.assert(getResponsiveCellSize() >= 16 && getResponsiveCellSize() <= CELL, "responsive cell size stays within usable bounds");
 }
 
 function Icon({ children }) {
   return <span className="inline-flex w-4 h-4 items-center justify-center text-base leading-none mr-2">{children}</span>;
 }
 
-function CellBlock({ letter, ghost = false, small = false, cellSize = CELL }) {
-  const size = small ? 22 : cellSize;
+function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smallSize = 22 }) {
+  const size = small ? smallSize : cellSize;
   return (
     <div
       className="flex items-center justify-center font-semibold select-none"
@@ -288,7 +292,7 @@ function CellBlock({ letter, ghost = false, small = false, cellSize = CELL }) {
         background: ghost ? "transparent" : PALETTE.paper,
         border: `2px solid ${ghost ? "rgba(0,0,0,.22)" : PALETTE.ink}`,
         color: ghost ? "rgba(0,0,0,.22)" : PALETTE.ink,
-        fontSize: small ? 18 : Math.max(16, Math.floor(cellSize * 0.76)),
+        fontSize: small ? Math.max(10, Math.floor(smallSize * 0.82)) : Math.max(16, Math.floor(cellSize * 0.76)),
         lineHeight: 1,
         fontFamily: "Arial, Helvetica, sans-serif",
       }}
@@ -298,23 +302,23 @@ function CellBlock({ letter, ghost = false, small = false, cellSize = CELL }) {
   );
 }
 
-function PiecePreview({ piece }) {
+function PiecePreview({ piece, blockSize = 22 }) {
   if (!piece) return null;
   const width = Math.max(...piece.shape.map(([x]) => x)) + 1;
   const height = Math.max(...piece.shape.map(([, y]) => y)) + 1;
   return (
     <div
       className="grid gap-0 place-content-center"
-      style={{ gridTemplateColumns: `repeat(${width}, 22px)`, gridTemplateRows: `repeat(${height}, 22px)` }}
+      style={{ gridTemplateColumns: `repeat(${width}, ${blockSize}px)`, gridTemplateRows: `repeat(${height}, ${blockSize}px)` }}
     >
       {Array.from({ length: width * height }).map((_, index) => {
         const x = index % width;
         const y = Math.floor(index / width);
         const pieceIndex = piece.shape.findIndex(([sx, sy]) => sx === x && sy === y);
         return pieceIndex >= 0 ? (
-          <CellBlock key={index} small letter={piece.letters[pieceIndex]} />
+          <CellBlock key={index} small smallSize={blockSize} letter={piece.letters[pieceIndex]} />
         ) : (
-          <div key={index} style={{ width: 22, height: 22 }} />
+          <div key={index} style={{ width: blockSize, height: blockSize }} />
         );
       })}
     </div>
@@ -330,7 +334,6 @@ export default function IDEOBlockParty() {
   const [musicEnabled, setMusicEnabled] = useState(() => readMusicEnabled());
   const [leaderboard, setLeaderboard] = useState([]);
   const [leaderboardStatus, setLeaderboardStatus] = useState("Loading shared leaderboard…");
-  const [scoreSaved, setScoreSaved] = useState(false);
   const [chaos, setChaos] = useState(INITIAL_CHAOS);
   const [piece, setPiece] = useState(() => makePiece(INITIAL_CHAOS));
   const [nextPiece, setNextPiece] = useState(() => makePiece(INITIAL_CHAOS));
@@ -340,9 +343,11 @@ export default function IDEOBlockParty() {
   const [gameOver, setGameOver] = useState(false);
   const [clearEffect, setClearEffect] = useState(0);
   const [levelNotice, setLevelNotice] = useState(0);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const touchStart = useRef(null);
   const clearEffectTimeoutRef = useRef(null);
   const chaosNoticeTimeoutRef = useRef(null);
+  const scoreSubmittedRef = useRef(false);
   /** While the chaos level-up overlay is visible, gravity and controls are frozen (music keeps playing). */
   const chaosNoticeBlocksPlayRef = useRef(false);
   const bgmRef = useRef(null);
@@ -482,7 +487,7 @@ export default function IDEOBlockParty() {
     setNextPiece(makePiece(nextChaos));
     setScore(0);
     setLines(0);
-    setScoreSaved(false);
+    scoreSubmittedRef.current = false;
     setClearEffect(0);
     setGameOver(false);
     setRunning(hasStarted);
@@ -527,6 +532,35 @@ export default function IDEOBlockParty() {
     }
   }, [hasStarted]);
 
+  const handleBoardTouchStart = useCallback((e) => {
+    const touch = e.touches[0];
+    touchStart.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      at: Date.now(),
+    };
+  }, []);
+
+  const handleBoardTouchEnd = useCallback((e) => {
+    if (!touchStart.current) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStart.current.x;
+    const dy = touch.clientY - touchStart.current.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    touchStart.current = null;
+
+    if (absY > 48 && absY > absX * 1.2 && dy > 0) {
+      hardDrop();
+      return;
+    }
+    if (absX > 36 && absX > absY) {
+      move(dx > 0 ? 1 : -1);
+      return;
+    }
+    rotatePiece();
+  }, [hardDrop, move, rotatePiece]);
+
   useEffect(() => {
     const id = window.setInterval(tick, speed);
     return () => window.clearInterval(id);
@@ -552,7 +586,6 @@ export default function IDEOBlockParty() {
 
   useEffect(() => {
     let cancelled = false;
-    setLeaderboardStatus("Loading shared leaderboard…");
     fetchLeaderboard()
       .then((entries) => {
         if (!cancelled) {
@@ -569,7 +602,8 @@ export default function IDEOBlockParty() {
   }, []);
 
   useEffect(() => {
-    if (!gameOver || scoreSaved || !hasStarted) return;
+    if (!gameOver || scoreSubmittedRef.current || !hasStarted) return;
+    scoreSubmittedRef.current = true;
     const entry = {
       name: sanitizePlayerName(playerName),
       score,
@@ -577,9 +611,11 @@ export default function IDEOBlockParty() {
       level: chaos,
     };
 
-    setScoreSaved(true);
-    setLeaderboardStatus("Saving score…");
-    submitScoreToLeaderboard(entry)
+    Promise.resolve()
+      .then(() => {
+        setLeaderboardStatus("Saving score…");
+        return submitScoreToLeaderboard(entry);
+      })
       .then(() => fetchLeaderboard())
       .then((entries) => {
         setLeaderboard(entries);
@@ -589,7 +625,7 @@ export default function IDEOBlockParty() {
         setLeaderboard((entries) => addLeaderboardEntry(entries, entry));
         setLeaderboardStatus("Could not save online. Showing temporary local score.");
       });
-  }, [chaos, gameOver, hasStarted, lines, playerName, score, scoreSaved]);
+  }, [chaos, gameOver, hasStarted, lines, playerName, score]);
 
   useEffect(
     () => () => {
@@ -653,8 +689,31 @@ export default function IDEOBlockParty() {
     return { duration: 0.2 };
   }, [clearEffect, levelNotice]);
 
+  const leaderboardContent = (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <strong className="text-sm uppercase tracking-wide">Leaderboard</strong>
+        <span className="text-xs">Top {MAX_LEADERBOARD_ENTRIES}</span>
+      </div>
+      <p className="text-xs mb-3">{leaderboardStatus}</p>
+      {leaderboard.length ? (
+        <div className="space-y-2">
+          {leaderboard.map((entry, index) => (
+            <div key={`${entry.name}-${entry.score}-${entry.created_at ?? index}`} className="grid grid-cols-[28px_1fr_auto] gap-2 items-center text-sm">
+              <div className="font-semibold">#{index + 1}</div>
+              <div className="truncate">{entry.name}</div>
+              <div className="font-semibold text-right">{entry.score}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm leading-relaxed">No scores yet. Be the first to own the dance floor.</p>
+      )}
+    </>
+  );
+
   return (
-    <div className="min-h-screen w-full p-4 md:p-8 flex items-center justify-center" style={{ background: PALETTE.bg, color: PALETTE.ink }}>
+    <div className="h-dvh md:min-h-screen md:h-auto w-full overflow-hidden md:overflow-visible p-2 md:p-8 flex items-center justify-center" style={{ background: PALETTE.bg, color: PALETTE.ink }}>
       {!hasStarted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(251,250,247,.92)" }}>
           <form
@@ -679,8 +738,28 @@ export default function IDEOBlockParty() {
           </form>
         </div>
       )}
-      <div className="w-full max-w-5xl grid md:grid-cols-[1fr_310px] gap-6 items-start">
-        <div className="space-y-3">
+      <div className="w-full max-w-5xl h-full md:h-auto grid md:grid-cols-[1fr_310px] gap-3 md:gap-6 items-center md:items-start">
+        <div className="h-full md:h-auto flex flex-col items-center justify-center gap-2 md:block md:space-y-3">
+          <div
+            className="md:hidden w-full max-w-[360px] rounded-2xl p-2 grid grid-cols-3 gap-2 text-center shadow-md"
+            style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
+          >
+            <div>
+              <div className="text-[10px] uppercase font-bold">Score</div>
+              <div className="text-xl font-semibold leading-none">{score}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-bold">Lines</div>
+              <div className="text-xl font-semibold leading-none">{lines}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-bold">Next</div>
+              <div className="flex justify-center max-h-[44px] overflow-hidden">
+                <PiecePreview piece={nextPiece} blockSize={12} />
+              </div>
+            </div>
+          </div>
+
           <motion.div animate={boardFrameMotion} transition={boardFrameTransition} className="flex justify-center">
             <div
               className="relative p-2 sm:p-3 rounded-2xl overflow-hidden"
@@ -688,17 +767,10 @@ export default function IDEOBlockParty() {
                 background: playfieldShellColor(chaos),
                 border: `2px solid ${PALETTE.ink}`,
                 boxShadow: "0 20px 50px rgba(0,0,0,.14)",
+                touchAction: "none",
               }}
-              onTouchStart={(e) => {
-                touchStart.current = e.touches[0].clientX;
-              }}
-              onTouchEnd={(e) => {
-                if (touchStart.current == null) return;
-                const dx = e.changedTouches[0].clientX - touchStart.current;
-                if (Math.abs(dx) > 40) move(dx > 0 ? 1 : -1);
-                else rotatePiece();
-                touchStart.current = null;
-              }}
+              onTouchStart={handleBoardTouchStart}
+              onTouchEnd={handleBoardTouchEnd}
             >
             <div className="grid" style={playfieldGridStyle}>
               {display.flatMap((row, y) =>
@@ -790,30 +862,45 @@ export default function IDEOBlockParty() {
             </div>
           </motion.div>
 
+          <div className="md:hidden text-center text-xs font-semibold leading-snug">
+            Tap to rotate. Swipe left/right to move. Swipe down to slam.
+          </div>
+
           <div
-            className="md:hidden grid grid-cols-3 gap-2 rounded-3xl p-3 shadow-lg"
+            className="md:hidden w-full max-w-[360px] grid grid-cols-4 gap-2 rounded-2xl p-2 shadow-md"
             style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
-            aria-label="Touch controls"
           >
-            <Button variant="outline" className="min-h-16 rounded-2xl text-3xl" aria-label="Move left" onClick={() => move(-1)}>
-              ←
+            <Button className="rounded-xl px-2 py-2 text-sm" onClick={() => setRunning((r) => !r)}>
+              {running ? "Pause" : "Play"}
             </Button>
-            <Button variant="outline" className="min-h-16 rounded-2xl text-base" aria-label="Rotate block" onClick={rotatePiece}>
-              ↻ Rotate
+            <Button className="rounded-xl px-2 py-2 text-sm" variant="outline" onClick={() => reset()}>
+              Reset
             </Button>
-            <Button variant="outline" className="min-h-16 rounded-2xl text-3xl" aria-label="Move right" onClick={() => move(1)}>
-              →
+            <Button
+              className="rounded-xl px-2 py-2 text-sm"
+              variant="outline"
+              aria-pressed={musicEnabled}
+              onClick={() => {
+                setMusicEnabled((on) => {
+                  const next = !on;
+                  try {
+                    window.localStorage.setItem(MUSIC_ENABLED_KEY, next ? "1" : "0");
+                  } catch {
+                    // ignore
+                  }
+                  return next;
+                });
+              }}
+            >
+              {musicEnabled ? "Music" : "Muted"}
             </Button>
-            <Button variant="outline" className="col-span-1 min-h-16 rounded-2xl text-base" aria-label="Drop one row" onClick={softDrop}>
-              Drop
-            </Button>
-            <Button className="col-span-2 min-h-16 rounded-2xl text-lg" aria-label="Slam block to the bottom" onClick={hardDrop}>
-              Slam
+            <Button className="rounded-xl px-2 py-2 text-sm" variant="outline" onClick={() => setLeaderboardOpen(true)}>
+              Scores
             </Button>
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="hidden md:block space-y-4">
           <Card className="rounded-2xl shadow-lg" style={{ border: `2px solid ${PALETTE.ink}`, background: PALETTE.paper }}>
             <CardContent className="p-5">
               <div className="flex items-center gap-3">
@@ -899,29 +986,37 @@ export default function IDEOBlockParty() {
           </Card>
 
           <Card className="rounded-2xl" style={{ border: `2px solid ${PALETTE.ink}`, background: PALETTE.paper }}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <strong className="text-sm uppercase tracking-wide">Leaderboard</strong>
-                <span className="text-xs">Top {MAX_LEADERBOARD_ENTRIES}</span>
-              </div>
-              <p className="text-xs mb-3">{leaderboardStatus}</p>
-              {leaderboard.length ? (
-                <div className="space-y-2">
-                  {leaderboard.map((entry, index) => (
-                    <div key={`${entry.name}-${entry.score}-${entry.created_at ?? index}`} className="grid grid-cols-[28px_1fr_auto] gap-2 items-center text-sm">
-                      <div className="font-semibold">#{index + 1}</div>
-                      <div className="truncate">{entry.name}</div>
-                      <div className="font-semibold text-right">{entry.score}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm leading-relaxed">No scores yet. Be the first to own the dance floor.</p>
-              )}
-            </CardContent>
+            <CardContent className="p-4">{leaderboardContent}</CardContent>
           </Card>
         </div>
       </div>
+
+      <AnimatePresence>
+        {leaderboardOpen && (
+          <motion.div
+            className="md:hidden fixed inset-0 z-50 flex items-end p-2"
+            style={{ background: "rgba(0,0,0,.28)" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setLeaderboardOpen(false)}
+          >
+            <motion.div
+              className="w-full rounded-3xl p-4 shadow-2xl"
+              style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
+              initial={{ y: 80 }}
+              animate={{ y: 0 }}
+              exit={{ y: 80 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {leaderboardContent}
+              <Button className="w-full mt-4 rounded-2xl" onClick={() => setLeaderboardOpen(false)}>
+                Back to game
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
