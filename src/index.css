@@ -1,1 +1,42 @@
 @import "tailwindcss";
+
+@keyframes ideoGlowFadeIn {
+  from {
+    filter: saturate(0.85) brightness(0.98);
+    opacity: 0.78;
+  }
+
+  to {
+    filter: saturate(1.25) brightness(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes ideoGlowPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(17, 17, 17, 0.82),
+      0 0 12px rgba(255, 79, 216, 0.52),
+      0 0 22px rgba(85, 199, 255, 0.38);
+    filter: saturate(1.12) brightness(1.02);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(17, 17, 17, 0.92),
+      0 0 20px rgba(255, 228, 92, 0.75),
+      0 0 34px rgba(82, 255, 143, 0.55);
+    filter: saturate(1.35) brightness(1.12);
+  }
+}
+
+@keyframes ideoRainbowDrift {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 200% 50%;
+  }
+}

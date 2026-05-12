@@ -37,6 +37,10 @@ const MAX_LEADERBOARD_ENTRIES = 10;
 const LETTERS = ["I", "D", "E", "O"];
 const LINE_CLEAR_TOAST_MS = 700;
 const CHAOS_LEVEL_TOAST_MS = 2600;
+const IDEO_WORD = "IDEO";
+const IDEO_LINE_MULTIPLIER = 2;
+const IDEO_BONUS_TOAST_MS = 1100;
+const IDEO_HINT_TOAST_MS = 2000;
 
 const PALETTE = {
   bg: "#fbfaf7",
@@ -192,8 +196,41 @@ function clearLines(board) {
   return { board: kept, cleared };
 }
 
+function findIdeoSpans(board) {
+  const spans = [];
+  board.forEach((row, y) => {
+    for (let x = 0; x <= row.length - IDEO_WORD.length; x += 1) {
+      const word = row.slice(x, x + IDEO_WORD.length).join("");
+      if (word === IDEO_WORD) spans.push({ x, y });
+    }
+  });
+  return spans;
+}
+
+function findIdeoSpanCells(board) {
+  return findIdeoSpans(board).flatMap(({ x, y }) => Array.from({ length: IDEO_WORD.length }, (_, i) => ({ x: x + i, y })));
+}
+
+function rowHasIdeo(row) {
+  for (let x = 0; x <= row.length - IDEO_WORD.length; x += 1) {
+    if (row.slice(x, x + IDEO_WORD.length).join("") === IDEO_WORD) return true;
+  }
+  return false;
+}
+
+function countClearedIdeoRows(board) {
+  return board.filter((row) => row.every(Boolean) && rowHasIdeo(row)).length;
+}
+
 function scoreForLines(cleared) {
   return [0, 100, 300, 550, 900, 1250, 1600][cleared] ?? cleared * 300;
+}
+
+function scoreForClear(cleared, chaos, ideoRows = 0) {
+  if (!cleared) return 5;
+  const base = scoreForLines(cleared) + chaos * 20 * cleared;
+  const bonusRows = Math.min(cleared, ideoRows);
+  return base + Math.round((base / cleared) * bonusRows * (IDEO_LINE_MULTIPLIER - 1));
 }
 
 function chaosFromTotalLines(totalLines) {
@@ -270,6 +307,9 @@ function runSelfTests() {
     chaosFromTotalLines(0) === 1 && chaosFromTotalLines(2) === 1 && chaosFromTotalLines(3) === 2 && chaosFromTotalLines(12) === MAX_CHAOS,
     "chaos tracks cumulative line clears",
   );
+  console.assert(findIdeoSpans([...board.slice(0, ROWS - 1), [null, "I", "D", "E", "O", null, null, null, null, null]])[0]?.x === 1, "findIdeoSpans detects horizontal IDEO");
+  console.assert(countClearedIdeoRows([...board.slice(0, ROWS - 1), ["I", "D", "E", "O", "I", "D", "E", "O", "I", "D"]]) === 1, "countClearedIdeoRows counts full IDEO rows");
+  console.assert(scoreForClear(1, 1, 1) === (scoreForLines(1) + 20) * IDEO_LINE_MULTIPLIER, "scoreForClear applies IDEO multiplier");
   console.assert(sanitizePlayerName("   ") === "Anonymous" && sanitizePlayerName("Tomoya Mori Long Name").length <= 18, "sanitizePlayerName handles empty and long names");
   console.assert(addLeaderboardEntry([{ name: "A", score: 10, lines: 0 }], { name: "B", score: 20, lines: 0 })[0].name === "B", "addLeaderboardEntry sorts high scores first");
   console.assert(SUPABASE_URL.includes("supabase.co") && SUPABASE_ANON_KEY.length > 80, "Supabase config is present");
@@ -281,7 +321,7 @@ function Icon({ children }) {
   return <span className="inline-flex w-4 h-4 items-center justify-center text-base leading-none mr-2">{children}</span>;
 }
 
-function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smallSize = 22 }) {
+function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smallSize = 22, ideoGlow = false }) {
   const size = small ? smallSize : cellSize;
   return (
     <div
@@ -289,12 +329,19 @@ function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smal
       style={{
         width: size,
         height: size,
-        background: ghost ? "transparent" : PALETTE.paper,
-        border: `2px solid ${ghost ? "rgba(0,0,0,.22)" : PALETTE.ink}`,
+        background: ghost
+          ? "transparent"
+          : ideoGlow
+            ? "radial-gradient(circle at 30% 30%, rgba(255,255,255,.7), transparent 34%), linear-gradient(120deg, #ff4fd8, #ffe45c, #52ff8f, #55c7ff, #b96cff, #ff4fd8)"
+            : PALETTE.paper,
+        backgroundSize: ideoGlow ? "180% 180%, 220% 220%" : undefined,
+        border: `2px solid ${ghost ? "rgba(0,0,0,.22)" : ideoGlow ? "#ffffff" : PALETTE.ink}`,
+        boxShadow: ideoGlow ? "0 0 0 2px rgba(17,17,17,.82), 0 0 12px rgba(255,79,216,.52), 0 0 22px rgba(85,199,255,.38)" : undefined,
         color: ghost ? "rgba(0,0,0,.22)" : PALETTE.ink,
         fontSize: small ? Math.max(10, Math.floor(smallSize * 0.82)) : Math.max(16, Math.floor(cellSize * 0.76)),
         lineHeight: 1,
         fontFamily: "Arial, Helvetica, sans-serif",
+        animation: ideoGlow ? "ideoGlowFadeIn 850ms ease-out, ideoGlowPulse 3.4s ease-in-out 850ms infinite, ideoRainbowDrift 5.8s linear infinite" : undefined,
       }}
     >
       {letter}
@@ -342,10 +389,15 @@ export default function IDEOBlockParty() {
   const [lines, setLines] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [clearEffect, setClearEffect] = useState(0);
+  const [ideoBonusEffect, setIdeoBonusEffect] = useState(0);
+  const [ideoHintVisible, setIdeoHintVisible] = useState(false);
   const [levelNotice, setLevelNotice] = useState(0);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const touchStart = useRef(null);
   const clearEffectTimeoutRef = useRef(null);
+  const ideoBonusTimeoutRef = useRef(null);
+  const ideoHintTimeoutRef = useRef(null);
+  const hasShownIdeoHintRef = useRef(false);
   const chaosNoticeTimeoutRef = useRef(null);
   const scoreSubmittedRef = useRef(false);
   /** While the chaos level-up overlay is visible, gravity and controls are frozen (music keeps playing). */
@@ -369,6 +421,7 @@ export default function IDEOBlockParty() {
   }, [musicEnabled, nameInput]);
 
   const speed = 680 - chaos * 90;
+  const noticesBlockPlay = levelNotice > 0 || ideoHintVisible;
 
   const dismissChaosLevelNotice = useCallback(() => {
     if (chaosNoticeTimeoutRef.current) {
@@ -431,13 +484,14 @@ export default function IDEOBlockParty() {
   const lockPiece = useCallback((currentBoard, currentPiece, dropBonus = 0) => {
     const { chaos: currentChaos, nextPiece: queuedPiece, lines: prevLines = 0 } = latestRef.current;
     const merged = merge(currentBoard, currentPiece);
+    const ideoBonusRows = countClearedIdeoRows(merged);
     const result = clearLines(merged);
     const nextLines = prevLines + result.cleared;
     const targetChaos = chaosFromTotalLines(nextLines);
 
     setBoard(result.board);
     setLines(nextLines);
-    setScore((s) => s + dropBonus + (result.cleared ? scoreForLines(result.cleared) + currentChaos * 20 * result.cleared : 5));
+    setScore((s) => s + dropBonus + scoreForClear(result.cleared, currentChaos, ideoBonusRows));
     if (clearEffectTimeoutRef.current) {
       window.clearTimeout(clearEffectTimeoutRef.current);
       clearEffectTimeoutRef.current = null;
@@ -450,6 +504,19 @@ export default function IDEOBlockParty() {
       }, LINE_CLEAR_TOAST_MS);
     } else {
       setClearEffect(0);
+    }
+    if (ideoBonusTimeoutRef.current) {
+      window.clearTimeout(ideoBonusTimeoutRef.current);
+      ideoBonusTimeoutRef.current = null;
+    }
+    if (ideoBonusRows > 0) {
+      setIdeoBonusEffect(ideoBonusRows);
+      ideoBonusTimeoutRef.current = window.setTimeout(() => {
+        setIdeoBonusEffect(0);
+        ideoBonusTimeoutRef.current = null;
+      }, IDEO_BONUS_TOAST_MS);
+    } else {
+      setIdeoBonusEffect(0);
     }
     if (targetChaos > currentChaos) {
       if (chaosNoticeTimeoutRef.current) {
@@ -471,16 +538,20 @@ export default function IDEOBlockParty() {
   const tick = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
     if (!hasStarted || !isRunning || isGameOver) return;
-    if (chaosNoticeBlocksPlayRef.current) return;
+    if (chaosNoticeBlocksPlayRef.current || ideoHintVisible) return;
     if (!collides(currentBoard, currentPiece, 0, 1)) {
       setPiece((p) => ({ ...p, y: p.y + 1 }));
     } else {
       lockPiece(currentBoard, currentPiece);
     }
-  }, [hasStarted, lockPiece]);
+  }, [hasStarted, ideoHintVisible, lockPiece]);
 
   const reset = useCallback((nextChaos = INITIAL_CHAOS) => {
     dismissChaosLevelNotice();
+    if (ideoHintTimeoutRef.current) {
+      window.clearTimeout(ideoHintTimeoutRef.current);
+      ideoHintTimeoutRef.current = null;
+    }
     setBoard(emptyBoard());
     setChaos(nextChaos);
     setPiece(makePiece(nextChaos));
@@ -489,20 +560,22 @@ export default function IDEOBlockParty() {
     setLines(0);
     scoreSubmittedRef.current = false;
     setClearEffect(0);
+    setIdeoBonusEffect(0);
+    setIdeoHintVisible(false);
     setGameOver(false);
     setRunning(hasStarted);
   }, [dismissChaosLevelNotice, hasStarted]);
 
   const move = useCallback((dx) => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
+    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || noticesBlockPlay) return;
     if (collides(currentBoard, currentPiece, dx, 0)) return;
     setPiece((p) => ({ ...p, x: p.x + dx }));
-  }, []);
+  }, [noticesBlockPlay]);
 
   const moveHorizontalSteps = useCallback((steps) => {
     const { board: currentBoard, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || steps === 0) return;
+    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || noticesBlockPlay || steps === 0) return;
     const direction = steps > 0 ? 1 : -1;
     setPiece((currentPiece) => {
       let nextPiece = currentPiece;
@@ -513,30 +586,30 @@ export default function IDEOBlockParty() {
       }
       return nextPiece;
     });
-  }, []);
+  }, [noticesBlockPlay]);
 
   const softDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || noticesBlockPlay) return;
     if (!collides(currentBoard, currentPiece, 0, 1)) {
       setPiece((p) => ({ ...p, y: p.y + 1 }));
       setScore((s) => s + 1);
     } else {
       lockPiece(currentBoard, currentPiece);
     }
-  }, [hasStarted, lockPiece]);
+  }, [hasStarted, lockPiece, noticesBlockPlay]);
 
   const hardDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || noticesBlockPlay) return;
     let drop = 0;
     while (!collides(currentBoard, currentPiece, 0, drop + 1)) drop += 1;
     lockPiece(currentBoard, { ...currentPiece, y: currentPiece.y + drop }, drop * 2);
-  }, [hasStarted, lockPiece]);
+  }, [hasStarted, lockPiece, noticesBlockPlay]);
 
   const rotatePiece = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
-    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
+    if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || noticesBlockPlay) return;
     const nextShape = rotate(currentPiece.shape);
     const kicks = [0, -1, 1, -2, 2];
     for (const k of kicks) {
@@ -545,7 +618,7 @@ export default function IDEOBlockParty() {
         return;
       }
     }
-  }, [hasStarted]);
+  }, [hasStarted, noticesBlockPlay]);
 
   const handleBoardTouchStart = useCallback((e) => {
     const touch = e.touches[0];
@@ -672,6 +745,8 @@ export default function IDEOBlockParty() {
   useEffect(
     () => () => {
       if (clearEffectTimeoutRef.current) window.clearTimeout(clearEffectTimeoutRef.current);
+      if (ideoBonusTimeoutRef.current) window.clearTimeout(ideoBonusTimeoutRef.current);
+      if (ideoHintTimeoutRef.current) window.clearTimeout(ideoHintTimeoutRef.current);
       if (chaosNoticeTimeoutRef.current) {
         window.clearTimeout(chaosNoticeTimeoutRef.current);
         chaosNoticeTimeoutRef.current = null;
@@ -686,6 +761,19 @@ export default function IDEOBlockParty() {
     while (!collides(board, ghost, 0, 1)) ghost.y += 1;
     return ghost;
   }, [board, piece]);
+
+  const ideoGlowCells = useMemo(() => new Set(findIdeoSpanCells(board).map(({ x, y }) => `${x}-${y}`)), [board]);
+
+  useEffect(() => {
+    if (hasShownIdeoHintRef.current || ideoGlowCells.size === 0) return;
+    hasShownIdeoHintRef.current = true;
+    Promise.resolve().then(() => setIdeoHintVisible(true));
+    if (ideoHintTimeoutRef.current) window.clearTimeout(ideoHintTimeoutRef.current);
+    ideoHintTimeoutRef.current = window.setTimeout(() => {
+      setIdeoHintVisible(false);
+      ideoHintTimeoutRef.current = null;
+    }, IDEO_HINT_TOAST_MS);
+  }, [ideoGlowCells]);
 
   const display = useMemo(() => {
     const nextDisplay = cloneBoard(board);
@@ -822,7 +910,11 @@ export default function IDEOBlockParty() {
               {display.flatMap((row, y) =>
                 row.map((cell, x) => (
                   <div key={`${x}-${y}`} style={{ width: cellSize, height: cellSize }}>
-                    {cell === "ghost" ? <CellBlock letter="" ghost cellSize={cellSize} /> : cell ? <CellBlock letter={cell} cellSize={cellSize} /> : null}
+                    {cell === "ghost" ? (
+                      <CellBlock letter="" ghost cellSize={cellSize} />
+                    ) : cell ? (
+                      <CellBlock letter={cell} cellSize={cellSize} ideoGlow={ideoGlowCells.has(`${x}-${y}`)} />
+                    ) : null}
                   </div>
                 )),
               )}
@@ -878,6 +970,29 @@ export default function IDEOBlockParty() {
                 </motion.div>
               )}
             </AnimatePresence>
+            <AnimatePresence>
+              {ideoHintVisible && !gameOver && (
+                <motion.div
+                  className="absolute inset-0 z-[6] pointer-events-none flex items-center justify-center p-4"
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                >
+                  <div
+                    className="rounded-2xl px-5 py-4 text-center text-sm sm:text-base font-bold shadow-xl max-w-[260px]"
+                    style={{
+                      background: "rgba(251,250,247,.94)",
+                      border: `2px solid ${PALETTE.ink}`,
+                      boxShadow: "0 0 0 4px rgba(255,255,255,.35), 0 22px 54px rgba(0,0,0,.28)",
+                    }}
+                  >
+                    <div>IDEO lined up.</div>
+                    <div className="mt-1 text-xs sm:text-sm font-semibold">Clear this row for a ×{IDEO_LINE_MULTIPLIER} score boost.</div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             {clearEffect > 0 && !gameOver && (
               <motion.div
                 className="absolute inset-0 z-[7] rounded-xl pointer-events-none flex items-center justify-center"
@@ -890,6 +1005,25 @@ export default function IDEOBlockParty() {
                   style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
                 >
                   LINE CLEAR ×{clearEffect}
+                </div>
+              </motion.div>
+            )}
+            {ideoBonusEffect > 0 && !gameOver && (
+              <motion.div
+                className="absolute inset-0 z-[8] rounded-xl pointer-events-none flex items-center justify-center"
+                initial={{ opacity: 0, y: 18, scale: 0.82 }}
+                animate={{ opacity: [0, 1, 1, 0], y: [18, -8, -8, -22], scale: [0.82, 1.1, 1.1, 1] }}
+                transition={{ duration: 1.1 }}
+              >
+                <div
+                  className="px-5 py-3 rounded-2xl text-2xl sm:text-3xl font-black tracking-tight shadow-xl text-center"
+                  style={{
+                    background: "linear-gradient(135deg, #ff4fd8, #ffe45c, #52ff8f, #55c7ff)",
+                    border: `2px solid ${PALETTE.ink}`,
+                    color: PALETTE.ink,
+                  }}
+                >
+                  IDEO BONUS ×{IDEO_LINE_MULTIPLIER}
                 </div>
               </motion.div>
             )}
