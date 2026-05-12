@@ -500,6 +500,21 @@ export default function IDEOBlockParty() {
     setPiece((p) => ({ ...p, x: p.x + dx }));
   }, []);
 
+  const moveHorizontalSteps = useCallback((steps) => {
+    const { board: currentBoard, running: isRunning, gameOver: isGameOver } = latestRef.current;
+    if (!isRunning || isGameOver || chaosNoticeBlocksPlayRef.current || steps === 0) return;
+    const direction = steps > 0 ? 1 : -1;
+    setPiece((currentPiece) => {
+      let nextPiece = currentPiece;
+      for (let i = 0; i < Math.abs(steps); i += 1) {
+        const candidate = { ...nextPiece, x: nextPiece.x + direction };
+        if (collides(currentBoard, candidate)) break;
+        nextPiece = candidate;
+      }
+      return nextPiece;
+    });
+  }, []);
+
   const softDrop = useCallback(() => {
     const { board: currentBoard, piece: currentPiece, running: isRunning, gameOver: isGameOver } = latestRef.current;
     if (!hasStarted || !isRunning || isGameOver || chaosNoticeBlocksPlayRef.current) return;
@@ -537,9 +552,38 @@ export default function IDEOBlockParty() {
     touchStart.current = {
       x: touch.clientX,
       y: touch.clientY,
-      at: Date.now(),
+      lastX: touch.clientX,
+      moved: false,
+      slammed: false,
     };
   }, []);
+
+  const handleBoardTouchMove = useCallback((e) => {
+    if (!touchStart.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStart.current.x;
+    const dy = touch.clientY - touchStart.current.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (!touchStart.current.slammed && dy > 52 && absY > absX * 1.25) {
+      touchStart.current.slammed = true;
+      touchStart.current.moved = true;
+      hardDrop();
+      return;
+    }
+
+    if (absX < 10 || absY > absX * 0.9) return;
+
+    const stepDistance = Math.max(12, cellSize * 0.7);
+    const dragDelta = touch.clientX - touchStart.current.lastX;
+    const steps = Math.trunc(dragDelta / stepDistance);
+    if (steps === 0) return;
+
+    touchStart.current.moved = true;
+    touchStart.current.lastX += steps * stepDistance;
+    moveHorizontalSteps(steps);
+  }, [cellSize, hardDrop, moveHorizontalSteps]);
 
   const handleBoardTouchEnd = useCallback((e) => {
     if (!touchStart.current) return;
@@ -548,18 +592,16 @@ export default function IDEOBlockParty() {
     const dy = touch.clientY - touchStart.current.y;
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
+    const moved = touchStart.current.moved;
+    const slammed = touchStart.current.slammed;
     touchStart.current = null;
 
-    if (absY > 48 && absY > absX * 1.2 && dy > 0) {
+    if (!slammed && absY > 48 && absY > absX * 1.2 && dy > 0) {
       hardDrop();
       return;
     }
-    if (absX > 36 && absX > absY) {
-      move(dx > 0 ? 1 : -1);
-      return;
-    }
-    rotatePiece();
-  }, [hardDrop, move, rotatePiece]);
+    if (!moved && absX <= 16 && absY <= 16) rotatePiece();
+  }, [hardDrop, rotatePiece]);
 
   useEffect(() => {
     const id = window.setInterval(tick, speed);
@@ -770,7 +812,11 @@ export default function IDEOBlockParty() {
                 touchAction: "none",
               }}
               onTouchStart={handleBoardTouchStart}
+              onTouchMove={handleBoardTouchMove}
               onTouchEnd={handleBoardTouchEnd}
+              onTouchCancel={() => {
+                touchStart.current = null;
+              }}
             >
             <div className="grid" style={playfieldGridStyle}>
               {display.flatMap((row, y) =>
@@ -863,7 +909,7 @@ export default function IDEOBlockParty() {
           </motion.div>
 
           <div className="md:hidden text-center text-xs font-semibold leading-snug">
-            Tap to rotate. Swipe left/right to move. Swipe down to slam.
+            Tap to rotate. Drag left/right to move. Swipe down to slam.
           </div>
 
           <div
