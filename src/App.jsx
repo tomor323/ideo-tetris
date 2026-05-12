@@ -100,7 +100,8 @@ const HIGH_CHAOS = [
 function Button({ children, className = "", variant = "default", ...props }) {
   return (
     <button
-      className={`px-4 py-2 rounded-2xl font-semibold transition active:scale-95 ${
+      type="button"
+      className={`px-4 py-2 rounded-2xl font-semibold transition active:scale-95 touch-manipulation ${
         variant === "outline" ? "bg-white border-2 border-black" : "bg-black text-white border-2 border-black"
       } ${className}`}
       {...props}
@@ -679,25 +680,26 @@ export default function IDEOBlockParty() {
         </div>
       )}
       <div className="w-full max-w-5xl grid md:grid-cols-[1fr_310px] gap-6 items-start">
-        <motion.div animate={boardFrameMotion} transition={boardFrameTransition} className="flex justify-center">
-          <div
-            className="relative p-2 sm:p-3 rounded-2xl overflow-hidden"
-            style={{
-              background: playfieldShellColor(chaos),
-              border: `2px solid ${PALETTE.ink}`,
-              boxShadow: "0 20px 50px rgba(0,0,0,.14)",
-            }}
-            onTouchStart={(e) => {
-              touchStart.current = e.touches[0].clientX;
-            }}
-            onTouchEnd={(e) => {
-              if (touchStart.current == null) return;
-              const dx = e.changedTouches[0].clientX - touchStart.current;
-              if (Math.abs(dx) > 40) move(dx > 0 ? 1 : -1);
-              else rotatePiece();
-              touchStart.current = null;
-            }}
-          >
+        <div className="space-y-3">
+          <motion.div animate={boardFrameMotion} transition={boardFrameTransition} className="flex justify-center">
+            <div
+              className="relative p-2 sm:p-3 rounded-2xl overflow-hidden"
+              style={{
+                background: playfieldShellColor(chaos),
+                border: `2px solid ${PALETTE.ink}`,
+                boxShadow: "0 20px 50px rgba(0,0,0,.14)",
+              }}
+              onTouchStart={(e) => {
+                touchStart.current = e.touches[0].clientX;
+              }}
+              onTouchEnd={(e) => {
+                if (touchStart.current == null) return;
+                const dx = e.changedTouches[0].clientX - touchStart.current;
+                if (Math.abs(dx) > 40) move(dx > 0 ? 1 : -1);
+                else rotatePiece();
+                touchStart.current = null;
+              }}
+            >
             <div className="grid" style={playfieldGridStyle}>
               {display.flatMap((row, y) =>
                 row.map((cell, x) => (
@@ -776,7 +778,7 @@ export default function IDEOBlockParty() {
             {gameOver && (
               <div className="absolute inset-0 rounded-xl bg-white/85 flex items-center justify-center text-center p-6">
                 <div>
-                  <div className="text-4xl font-semibold tracking-tight">Block overload</div>
+                  <div className="text-4xl font-semibold tracking-tight">IDEO-verload</div>
                   <p className="mt-2 text-sm">The grid couldn&apos;t take the party anymore.</p>
                   <div className="mt-3 text-sm">Score submitted for <strong>{sanitizePlayerName(playerName)}</strong>.</div>
                   <Button className="mt-4 rounded-2xl" onClick={() => reset()}>
@@ -785,8 +787,31 @@ export default function IDEOBlockParty() {
                 </div>
               </div>
             )}
+            </div>
+          </motion.div>
+
+          <div
+            className="md:hidden grid grid-cols-3 gap-2 rounded-3xl p-3 shadow-lg"
+            style={{ background: PALETTE.paper, border: `2px solid ${PALETTE.ink}` }}
+            aria-label="Touch controls"
+          >
+            <Button variant="outline" className="min-h-16 rounded-2xl text-3xl" aria-label="Move left" onClick={() => move(-1)}>
+              ←
+            </Button>
+            <Button variant="outline" className="min-h-16 rounded-2xl text-base" aria-label="Rotate block" onClick={rotatePiece}>
+              ↻ Rotate
+            </Button>
+            <Button variant="outline" className="min-h-16 rounded-2xl text-3xl" aria-label="Move right" onClick={() => move(1)}>
+              →
+            </Button>
+            <Button variant="outline" className="col-span-1 min-h-16 rounded-2xl text-base" aria-label="Drop one row" onClick={softDrop}>
+              Drop
+            </Button>
+            <Button className="col-span-2 min-h-16 rounded-2xl text-lg" aria-label="Slam block to the bottom" onClick={hardDrop}>
+              Slam
+            </Button>
           </div>
-        </motion.div>
+        </div>
 
         <div className="space-y-4">
           <Card className="rounded-2xl shadow-lg" style={{ border: `2px solid ${PALETTE.ink}`, background: PALETTE.paper }}>
@@ -830,52 +855,12 @@ export default function IDEOBlockParty() {
                 </div>
               </div>
 
-              <div className="mt-5">
-                <div className="flex justify-between text-sm font-bold">
-                  <span>Chaos level</span>
-                  <span>Level {chaos}</span>
-                </div>
-                <input
-                  className="w-full mt-2 accent-black opacity-70 cursor-not-allowed"
-                  type="range"
-                  min={MIN_CHAOS}
-                  max={MAX_CHAOS}
-                  step="1"
-                  value={chaos}
-                  disabled
-                  aria-label="Chaos level (rises as you clear lines)"
-                />
-                <div className="grid grid-cols-5 gap-1 mt-3" aria-label="Chaos level indicator">
-                  {Array.from({ length: MAX_CHAOS }, (_, i) => i + 1).map((level) => (
-                    <div
-                      key={level}
-                      className="rounded-lg py-1 text-center text-xs font-semibold"
-                      style={{ background: level === chaos ? PALETTE.ink : PALETTE.soft, color: level === chaos ? PALETTE.paper : PALETTE.ink }}
-                    >
-                      {level}
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs mt-2 leading-relaxed">
-                  Starts at Chaos 1. Every {LINES_PER_CHAOS_LEVEL} lines cleared bumps chaos by one, up to Level {MAX_CHAOS}.
-                  {chaos < MAX_CHAOS ? (
-                    <>
-                      {" "}
-                      Clear <strong>{chaos * LINES_PER_CHAOS_LEVEL - lines}</strong> more line
-                      {chaos * LINES_PER_CHAOS_LEVEL - lines === 1 ? "" : "s"} for Chaos {chaos + 1}.
-                    </>
-                  ) : (
-                    <> Maximum chaos.</>
-                  )}
-                </p>
-              </div>
-
               <div className="mt-5 rounded-xl p-4 flex items-center justify-between" style={{ background: PALETTE.soft }}>
                 <div>
                   <div className="text-xs uppercase font-bold mb-2">Next</div>
                   <PiecePreview piece={nextPiece} />
                 </div>
-                <div className="text-right text-xs leading-relaxed max-w-[145px]">
+                <div className="hidden md:block text-right text-xs leading-relaxed max-w-[145px]">
                   Arrow keys move/drop.<br />↑ rotates. Space slams.<br />C resets the game.
                 </div>
               </div>
@@ -910,23 +895,6 @@ export default function IDEOBlockParty() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mt-3 md:hidden">
-                <Button variant="outline" className="rounded-2xl" onClick={() => move(-1)}>
-                  ←
-                </Button>
-                <Button variant="outline" className="rounded-2xl" onClick={rotatePiece}>
-                  Rotate
-                </Button>
-                <Button variant="outline" className="rounded-2xl" onClick={() => move(1)}>
-                  →
-                </Button>
-                <Button variant="outline" className="rounded-2xl col-span-2" onClick={softDrop}>
-                  Drop
-                </Button>
-                <Button variant="outline" className="rounded-2xl" onClick={hardDrop}>
-                  Slam
-                </Button>
-              </div>
             </CardContent>
           </Card>
 
