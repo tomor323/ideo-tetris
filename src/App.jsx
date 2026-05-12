@@ -25,10 +25,10 @@ function readStoredPlayerName() {
 function readMusicEnabled() {
   try {
     const v = window.localStorage.getItem(MUSIC_ENABLED_KEY);
-    if (v === null) return true;
+    if (v === null) return false;
     return v !== "0";
   } catch {
-    return true;
+    return false;
   }
 }
 const SUPABASE_URL = "https://xxlzekgookhwnwuwjtzb.supabase.co";
