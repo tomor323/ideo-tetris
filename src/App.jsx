@@ -321,6 +321,45 @@ function Icon({ children }) {
   return <span className="inline-flex w-4 h-4 items-center justify-center text-base leading-none mr-2">{children}</span>;
 }
 
+function LogoGlyph({ letter, size }) {
+  const glyphStyle = { fill: "currentColor" };
+  const normalizedLetter = String(letter).toUpperCase();
+
+  return (
+    <svg width={Math.round(size * 0.62)} height={Math.round(size * 0.62)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+      {normalizedLetter === "I" && (
+        <>
+          <rect x="20" y="17" width="60" height="7" style={glyphStyle} />
+          <rect x="46.5" y="17" width="7" height="66" style={glyphStyle} />
+          <rect x="20" y="76" width="60" height="7" style={glyphStyle} />
+        </>
+      )}
+      {normalizedLetter === "D" && (
+        <path
+          style={glyphStyle}
+          fillRule="evenodd"
+          d="M23 16h27c23 0 39 14 39 34S73 84 50 84H23V16Zm10 10v48h17c17 0 29-10 29-24S67 26 50 26H33Z"
+        />
+      )}
+      {normalizedLetter === "E" && (
+        <>
+          <rect x="23" y="16" width="58" height="9" style={glyphStyle} />
+          <rect x="23" y="45.5" width="46" height="9" style={glyphStyle} />
+          <rect x="23" y="75" width="58" height="9" style={glyphStyle} />
+          <rect x="23" y="16" width="9" height="68" style={glyphStyle} />
+        </>
+      )}
+      {normalizedLetter === "O" && (
+        <path
+          style={glyphStyle}
+          fillRule="evenodd"
+          d="M50 12c22 0 38 16 38 38S72 88 50 88 12 72 12 50s16-38 38-38Zm0 10c-17 0-29 12-29 28s12 28 29 28 29-12 29-28-12-28-29-28Z"
+        />
+      )}
+    </svg>
+  );
+}
+
 function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smallSize = 22, ideoGlow = false }) {
   const size = small ? smallSize : cellSize;
   return (
@@ -329,22 +368,19 @@ function CellBlock({ letter, ghost = false, small = false, cellSize = CELL, smal
       style={{
         width: size,
         height: size,
-        background: ghost
-          ? "transparent"
-          : ideoGlow
-            ? "radial-gradient(circle at 30% 30%, rgba(255,255,255,.7), transparent 34%), linear-gradient(120deg, #ff4fd8, #ffe45c, #52ff8f, #55c7ff, #b96cff, #ff4fd8)"
-            : PALETTE.paper,
+        backgroundColor: ghost ? "transparent" : PALETTE.paper,
+        backgroundImage: ideoGlow
+          ? "radial-gradient(circle at 30% 30%, rgba(255,255,255,.7), transparent 34%), linear-gradient(120deg, #ff4fd8, #ffe45c, #52ff8f, #55c7ff, #b96cff, #ff4fd8)"
+          : undefined,
         backgroundSize: ideoGlow ? "180% 180%, 220% 220%" : undefined,
         border: `2px solid ${ghost ? "rgba(0,0,0,.22)" : ideoGlow ? "#ffffff" : PALETTE.ink}`,
         boxShadow: ideoGlow ? "0 0 0 2px rgba(17,17,17,.82), 0 0 12px rgba(255,79,216,.52), 0 0 22px rgba(85,199,255,.38)" : undefined,
         color: ghost ? "rgba(0,0,0,.22)" : PALETTE.ink,
-        fontSize: small ? Math.max(10, Math.floor(smallSize * 0.82)) : Math.max(16, Math.floor(cellSize * 0.76)),
         lineHeight: 1,
-        fontFamily: "Arial, Helvetica, sans-serif",
         animation: ideoGlow ? "ideoGlowFadeIn 850ms ease-out, ideoGlowPulse 3.4s ease-in-out 850ms infinite, ideoRainbowDrift 5.8s linear infinite" : undefined,
       }}
     >
-      {letter}
+      {letter ? <LogoGlyph letter={letter} size={size} /> : null}
     </div>
   );
 }
