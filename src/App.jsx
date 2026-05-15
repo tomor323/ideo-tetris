@@ -326,34 +326,34 @@ function LogoGlyph({ letter, size }) {
   const normalizedLetter = String(letter).toUpperCase();
 
   return (
-    <svg width={Math.round(size * 0.62)} height={Math.round(size * 0.62)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+    <svg width={Math.round(size * 0.66)} height={Math.round(size * 0.66)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       {normalizedLetter === "I" && (
         <>
-          <rect x="20" y="17" width="60" height="7" style={glyphStyle} />
-          <rect x="46.5" y="17" width="7" height="66" style={glyphStyle} />
-          <rect x="20" y="76" width="60" height="7" style={glyphStyle} />
+          <rect x="19" y="16" width="62" height="9" style={glyphStyle} />
+          <rect x="45.5" y="16" width="9" height="68" style={glyphStyle} />
+          <rect x="19" y="75" width="62" height="9" style={glyphStyle} />
         </>
       )}
       {normalizedLetter === "D" && (
         <path
           style={glyphStyle}
           fillRule="evenodd"
-          d="M23 16h27c23 0 39 14 39 34S73 84 50 84H23V16Zm10 10v48h17c17 0 29-10 29-24S67 26 50 26H33Z"
+          d="M22 15h29c24 0 40 15 40 35S75 85 51 85H22V15Zm12 12v46h17c16 0 28-10 28-23S67 27 51 27H34Z"
         />
       )}
       {normalizedLetter === "E" && (
         <>
-          <rect x="23" y="16" width="58" height="9" style={glyphStyle} />
-          <rect x="23" y="45.5" width="46" height="9" style={glyphStyle} />
-          <rect x="23" y="75" width="58" height="9" style={glyphStyle} />
-          <rect x="23" y="16" width="9" height="68" style={glyphStyle} />
+          <rect x="22" y="15" width="60" height="11" style={glyphStyle} />
+          <rect x="22" y="44.5" width="48" height="11" style={glyphStyle} />
+          <rect x="22" y="74" width="60" height="11" style={glyphStyle} />
+          <rect x="22" y="15" width="11" height="70" style={glyphStyle} />
         </>
       )}
       {normalizedLetter === "O" && (
         <path
           style={glyphStyle}
           fillRule="evenodd"
-          d="M50 12c22 0 38 16 38 38S72 88 50 88 12 72 12 50s16-38 38-38Zm0 10c-17 0-29 12-29 28s12 28 29 28 29-12 29-28-12-28-29-28Z"
+          d="M50 11c23 0 39 17 39 39S73 89 50 89 11 72 11 50s16-39 39-39Zm0 12c-16 0-28 11-28 27s12 27 28 27 28-11 28-27-12-27-28-27Z"
         />
       )}
     </svg>
