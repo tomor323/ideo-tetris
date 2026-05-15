@@ -326,7 +326,7 @@ function LogoGlyph({ letter, size }) {
   const normalizedLetter = String(letter).toUpperCase();
 
   return (
-    <svg width={Math.round(size * 0.66)} height={Math.round(size * 0.66)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+    <svg width={Math.round(size * 0.7)} height={Math.round(size * 0.7)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       {normalizedLetter === "I" && (
         <>
           <rect x="19" y="16" width="62" height="9" style={glyphStyle} />
