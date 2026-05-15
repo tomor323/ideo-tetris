@@ -329,9 +329,9 @@ function LogoGlyph({ letter, size }) {
     <svg width={Math.round(size * 0.7)} height={Math.round(size * 0.7)} viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       {normalizedLetter === "I" && (
         <>
-          <rect x="19" y="16" width="62" height="9" style={glyphStyle} />
-          <rect x="45.5" y="16" width="9" height="68" style={glyphStyle} />
-          <rect x="19" y="75" width="62" height="9" style={glyphStyle} />
+          <rect x="17" y="14" width="66" height="12" style={glyphStyle} />
+          <rect x="44" y="14" width="12" height="72" style={glyphStyle} />
+          <rect x="17" y="74" width="66" height="12" style={glyphStyle} />
         </>
       )}
       {normalizedLetter === "D" && (
